@@ -1,0 +1,690 @@
+---
+title: "Curveball Swing and Miss"
+output:
+  html_document:
+    df_print: paged
+---
+
+### Objective  
+
+Create a model to evaluate pitcher's ability to generate swing and miss(whiff) with curveballs.  
+
+### Range of the Dataset  
+
+2083 CBs thrown by the Braves' pitchers in 2018 and 2019 (not completely true data).  
+
+### Types of inputs  
+
+- Pitcher_Throws: The pitcher’s handedness  
+- Batter_Hits: The batter’s handedness    
+- release_speed: The pitch’s velocity (mph)  
+- x_movement: The pitch’s horizontal movement (inches)    
+- z_movement: The pitch’s vertical movement (inches)    
+- release_spin_rate: The pitch’s spin rate (rpm)   
+- spin_dir: The pitch’s spin axis (degrees)   
+- release_pos_x: The horizontal release point for that pitch (ft)    
+- release_pos_z: The vertical release point for that pitch (ft)    
+- release_extension: The release extension for that pitch (ft)   
+- plate_x: The horizontal location of the ball when it crosses home plate (ft)  
+- plate_z: The vertical location of the ball when it crosses home plate (ft)  
+
+There are also a few context features like innings, strikes, runners, outs in this dataset. However, in this project we will focus more on the above features first.  
+
+### Steps    
+- Data Preprocessing  
+- Exploratory Data Analysis  
+- Initial Logistic Regression Models  
+  -   Model 1: if the CB will generate a whiff based on the features given  
+  -   Model 2: if the CB will generate a whiff given that the batter swings at the pitch based on the features given  
+- GAM Models    
+  -   GAM with Interaction between Smoothed and Factor Variables   
+  -   GAM with Interaction between Smoothed Variables   
+  -   Calibration Plot  
+  -   SMAA and Split Half Correlation  
+- Random Forest and XGBoost Models    
+- CB Swing and Miss True Talent  
+- Mixed Model  
+- Takeaways  
+- Limitations and Potential Future Steps  
+
+### Data Preprocessing  
+**Initializing Code**  
+```{r setup}
+# Load packages
+box::use(
+  dplyr[...],
+  ggplot2[...],
+  bbdbc[...],
+  readr[write_rds, read_rds],
+  tidyr[...],
+  thematic[thematic_on],
+  here[here],
+  mgcv[...],
+  modelr[add_predictions],
+  caret[...],
+  performance[...],
+  olsrr[...],
+  MASS[...],
+  ggrepel[...],
+  lme4[...]
+)
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+**Load Data**    
+```{r filtering}
+#Load the dataset
+df_cb <- readRDS(here('df_cb.rds'))
+```
+
+```{r structure}
+#Take a look at the structure of the dataset
+str(df_cb)
+```
+
+**Data Type Conversion**    
+```{r type conversion}
+#Rename the column ï..Pitcher_ID
+df_cb <- df_cb %>%
+  rename(Pitcher_ID = ï..Pitcher_ID)
+
+#Some data type conversion is needed 
+cols.factor <- c("Pitcher_ID","Pitcher_Throws", "Batter_Hits")
+df_cb[cols.factor] <- sapply(df_cb[cols.factor],as.factor)
+
+cols.num <- c("release_speed","x_movement", "z_movement", "release_spin_rate", "spin_dir", "release_pos_x", "release_pos_z", "release_extension", "plate_x", "plate_z")
+df_cb[cols.num] <- sapply(df_cb[cols.num],as.numeric)
+```
+
+### EDA and Data Visualization    
+In Figure 1 and Figure 2, we will look at some distribution plots for the variables of interests.  
+```{r distribution plots}
+#Distribution plots without splitting by the pitcher's handedness
+plot_df <- df_cb %>% 
+  pivot_longer(
+    cols = c(release_pos_z, plate_z, release_speed, release_spin_rate, z_movement, release_extension),
+    names_to = 'Variable',
+    values_to = 'value'
+  ) %>% filter(!is.na(value))
+
+ggplot(plot_df, aes(x = value, y = ..count..)) +
+  geom_histogram(bins = 30, color ='black', fill = 'lightblue') +
+  facet_wrap(vars(Variable), scales = 'free') +
+  ggtitle("Figure 1")
+```
+
+```{r distribution plots 2}
+#Distribution plots splitting by the pitcher's handedness
+plot_df2 <- df_cb %>% 
+  pivot_longer(
+    cols = c(x_movement, plate_x, spin_dir, release_pos_x),
+    names_to = 'Variable',
+    values_to = 'value') %>% 
+  filter(!is.na(value))
+
+ggplot(plot_df2, aes(x = value, y = ..count..)) +
+  geom_histogram(bins = 30, fill = 'lightblue', color = 'black') +
+  facet_grid(cols = vars(Variable), rows = vars(Pitcher_Throws), scales = 'free') +
+  ggtitle("Figure 2")
+```
+
+The thing that stood out here is that standardizing horizontal release position(release_pos_x), spin direction(spin_dir) and horizontal movement(x_movement) for pitcher handedness(Pitcher_Throws) could be worth considering. However, since our dataset also includes batting side(Batter_Hits), I want to put both Pitcher_Throws and Batter_Hits into the logistic regression models later to take into account the platoon splits. Thus, I decided to not standardizing these three variables here. Keep in mind that the plate location plot in the whole project is from **pitcher's view**.  
+
+```{r scatterplot}
+#Plate location for different pitch outcomes
+ggplot(df_cb %>% filter(Pitch_Outcome %in% c('BallCalled', 'StrikeSwinging', 'StrikeCalled')), 
+       aes(x= plate_x, y = plate_z)) +
+  geom_point(color ='black') +
+  facet_wrap(vars(Pitch_Outcome)) +
+  ggtitle("Figure 3: Plate Location from Pitcher's View")
+```
+
+From Figure 3 above, we can see that plate_z seems to be highly correlated with CB whiff rate. The whiffs were located mostly at the lower half of the strike zone or those lower and outside of the strike zone.  
+
+```{r pitch_outcome}
+summary(as.factor(df_cb$Pitch_Outcome))
+```
+As from above, there are six types of pitch outcome in this dataset.  
+
+### Initial Logistic Regression Models  
+We will start with two logistic regression models with stepwise feature selection. The dependent variable of the first model will be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of BallCalled, FoulBall, InPlay or StrikeCalled. By this, we get to expect **if the pitch will generate a whiff based on the features given**. In Model 2, the dependent variable will also be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of Foul Ball or InPlay. In this second model, we get to expect **if the pitch will generate a whiff given that the batters swing at the pitch based on the features given**. Both models have their own intention. Although traditionally swing and miss rate is defined as the pitches hitters swing and miss at divided by total pitches thrown by a pitcher(Model 2), here we will actually focus a bit more on Model 1 because Model 1 here has the higher accuracy as from below (0.89 in Model1 and 0.77 in Model2), and also intuitively, we could want our pitchers to throw a pitch that both gets the batter to swing and then miss.  
+
+**Logistic Regression Model 1**    
+```{r logistic regression model 1}
+#Set the targeted outcome
+df_train1 <- df_cb %>% 
+  filter(Pitch_Outcome != 'HitByPitch') %>% 
+  mutate(
+    SwingAndMiss = case_when(
+      Pitch_Outcome == 'StrikeSwinging' ~ 1,
+      T ~ 0)) %>%
+  drop_na()
+
+#80/20 Train test split for test accuracy
+set.seed(3456)
+trainIndex <- createDataPartition(df_train1$SwingAndMiss, p = .8,
+                                  list = FALSE,
+                                  times = 1)
+
+Train <- df_train1[ trainIndex,]
+Test  <- df_train1[-trainIndex,]
+
+#Stepwise feature selection
+full.model <- glm(SwingAndMiss ~ Pitcher_Throws + Batter_Hits +
+                  release_speed + x_movement + z_movement +
+                  release_spin_rate + spin_dir + release_pos_x + release_pos_z +
+                  release_extension + plate_x + plate_z, data = Train, family = binomial)
+
+step.model <- full.model %>% stepAIC(trace = FALSE)
+
+#Summary of the model
+summary(step.model)
+
+#Test accuracy
+Test$model_prob <- predict(step.model, Test, type = "response")
+Test <- Test  %>% mutate(model_pred = 1*(model_prob > .5) + 0)
+Test <- Test %>% mutate(accurate = 1*(model_pred == SwingAndMiss))
+print(paste0("Test Accuracy = ", sum(Test$accurate)/nrow(Test)))
+
+```
+
+-   After stepwise feature selection, the variables that stood out were release_speed, x_movement, release_spin_rate, release_pos_z, plate_x and plate_z. 
+-   The logistic regression coefficients give the change in the log odds of the outcome for a one unit increase in the predictor variable. For example, for a one unit increase in plate_z, the log odds of the pitch being a swinging strike decreases by 0.47.  
+-   Vertical release position and vertical plate location both significantly, and negatively, affected the probability of a whiff. Just like what we saw from the exploratory data analysis, throwing at the lower part of the strike zone or even lower than the strike zone could generate more whiffs. And perhaps that can be done by adjusting the vertical release position.  
+-   Release speed and spin rate can affect the probability of whiff positively, which is quite intuitive.  
+-   From plate_x and x_movement, it seems like locating the CBs slightly toward left handed batter side could be more effective than toward right handed batter side.  
+
+**Logistic Regression Model 2**    
+```{r logistic regression model 2}
+#Set the targeted outcome
+df_train2 <- df_cb %>% 
+  filter(Pitch_Outcome %in% c('StrikeSwinging', 'FoulBall', 'InPlay')) %>% 
+  mutate(
+    SwingAndMiss = case_when(
+      Pitch_Outcome == 'StrikeSwinging' ~ 1,
+      T ~ 0)) %>%
+  drop_na()
+
+#80/20 Train test split for test accuracy
+set.seed(3456)
+trainIndex <- createDataPartition(df_train2$SwingAndMiss, p = .8,
+                                  list = FALSE,
+                                  times = 1)
+
+Train <- df_train2[ trainIndex,]
+Test  <- df_train2[-trainIndex,]
+
+#Stepwise feature selection
+full.model <- glm(SwingAndMiss ~ Pitcher_Throws + Batter_Hits +
+                  release_speed + x_movement + z_movement +
+                  release_spin_rate + spin_dir + release_pos_x + release_pos_z +
+                  release_extension + plate_x + plate_z, data = Train, family = binomial)
+
+step.model <- full.model %>% stepAIC(trace = FALSE)
+
+#Summary of the model
+summary(step.model)
+
+#Test accuracy
+Test$model_prob <- predict(step.model, Test, type = "response")
+Test <- Test  %>% mutate(model_pred = 1*(model_prob > .5) + 0)
+Test <- Test %>% mutate(accurate = 1*(model_pred == SwingAndMiss))
+print(paste0("Test Accuracy = ", sum(Test$accurate)/nrow(Test)))
+```
+In Model 2, although the accuracy was a bit lower(0.77) than in Model 1(0.89), it is still promising to find out that similar variables affected the probability of whiff significantly. Based on the test accuracy and as mentioned before, the fact that we could want our pitchers to throw a pitch that both gets the batter to swing and then miss, we will focus more on building different types of models to compare with Model 1 in the next steps.  
+
+### GAM Models  
+**GAM with Interaction Between Smoothed and Factor Variables**      
+The results of the baseline logistic regression models are okay, but there could still be non-linear relationships between the variables of interests and whiff rate. Some methods to tackle non-linear relationships include transforming linear terms (polynomial) and flexible modeling techniques like GAM (fitting smooth-ish data), Boosted Trees. Here I will focus on GAM. Since plate locations are the two main variables contributing to my logistic regression models, I'll focus on these two variables as well as examine interaction effects to determine whether the non-linear smoother s(plate_x) varies across different levels of Pitch and Bat Hand. There will be four levels(LL, LR, RL, RR) indicating the pitch and bat hand, respectively.  
+```{r gam initial model}
+#GAM model
+df_train1 <- df_train1 %>%
+  mutate(PitchAndBatSide = as.factor(paste0(Pitcher_Throws,',',Batter_Hits)))
+
+gam_mod <- gam(SwingAndMiss ~ s(plate_x, by = PitchAndBatSide) + s(plate_z),
+               family = 'binomial',
+               data = df_train1)
+
+summary(gam_mod)
+```
+
+This summary covers smooth terms. For smooths coefficients are not printed. This is because each smooth has several coefficients - one for each basis function. Instead, the first column reads edf, which stands for effective degrees of freedom. This value represents the complexity of the smooth. An edf of 1 is equivalent to a straight line. An edf of 2 is equivalent to a quadratic curve, and so on, with higher edfs describing more wiggly curves. Similar to what we saw from the previous models, the plate location (both horizontal and vertical) were significant in the model.  
+```{r gam plot}
+plot(gam_mod)
+```
+
+Above are partial effect plots for the variables smooths. Similar to what we saw from the previous models, vertical location being down and/or outside of the strike zone could generate more swing and miss. As for horizontal location, after controlling for the pitch and bat handedness, it seems like throwing at the middle of the plate could be most effective, and slightly toward LHH is more effective than toward RHH.  
+
+Here's also a look at the summary of the fitted values of the model.  
+```{r gam model fitted values}
+summary(gam_mod$fitted.values)
+```
+
+**Explore Validation**     
+To better understand the gam model with these variables, I came up with plots, as shown in Figure 4 below, showing the predicted probability of a whiff based on the plate location. For vertical location the outcome is basically the same. But for horizontal location, for left handed pitchers, in the top two plots, it seems like throwing to the outside of the batter would be more effective. As for the horizontal location for right handed pitchers, throwing to the left handed batter side could be more effective regardless of the actual batter handedness.  
+```{r pred_prob plot}
+df_grid <- expand.grid(plate_z = seq(-2, 6, .1), plate_x = seq(-4,4,.1), PitchAndBatSide = c("L,L", "L,R", "R,L", "R,R")) %>% 
+  add_predictions(gam_mod, var = 'pred_prob', type = 'response')
+
+ggplot(df_grid, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
+  geom_raster() +
+  geom_contour() +
+  facet_wrap(vars(PitchAndBatSide))  +
+  ggtitle("Figure 4")
+```
+
+**GAM with Interaction Between Smoothed Variables**  
+However, there's a decent chance that plate_x is related to plate_z in a way. Thus I'll create a smooth for the interaction of the two plate location variables, and then examine interaction effects to determine whether the non-linear smoother s(plate_x, plate_z) varies across different levels of Pitch and Bat Hand.  
+```{r interaction gam}
+#GAM with interaction terms
+gam_mod_xy <- gam(SwingAndMiss ~ s(plate_x, plate_z, by = PitchAndBatSide, k = 50),
+               family = 'binomial', discrete = T,
+               data = df_train1)
+
+summary(gam_mod_xy)
+```
+
+The first 3D plot below illustrated a non-linear interaction effect between plate_x and plate_z.  
+```{r interaction gam plot}
+#The plot for GAM with interaction terms
+vis.gam(gam_mod_xy, view = c("plate_x", "plate_z"),
+    theta = 50, n.grid = 50, lwd = 0.4)
+```
+
+Another interesting finding here in Figure 5 is that after considering the interaction between horizontal and vertical location and splitting it by pitcher/batter handedness, for LHP vs. RHB specifically, throwing down and out is the most effective. And for the other three combinations, it's like what we saw from previous sections: vertically throwing at the lower half of the strikezone or out of the strike zone and horizontally throwing at the left handed batter side is more effective. 
+```{r interaction game 2}
+df_grid <- expand.grid(plate_z = seq(-2, 6, .1), plate_x = seq(-4,4,.1), PitchAndBatSide = c("L,L", "L,R", "R,L", "R,R")) %>% 
+  add_predictions(gam_mod_xy, var = 'pred_prob', type = 'response')
+
+ggplot(df_grid, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
+  geom_raster() +
+  geom_contour() +
+  coord_fixed() +
+  facet_wrap(vars(PitchAndBatSide)) +
+  ggtitle("Figure 5")
+```
+
+One thing though, is that the model with the interaction between s(plate_x) and s(plate_z) has a higher AIC, which means including this interaction does not improve our model’s performance. But still, it was close and reasonable to think that some non-linear interaction effect could actually be the real case in baseball and help with our prediction going forward.  
+```{r comparison between gam and gam_xy}
+#Check for AIC to compare gam_mod with gam_mod_xy
+AIC(gam_mod, gam_mod_xy)
+```
+
+**Calibration Plot**    
+In Figure 6 below I will bin the predicted probabilities from the **gam_mod_xy** into groups, check the number of instances in each group and calculate the actual swing and miss rate for each group, which is the concept of a calibration plot. A good model would have the dots close to the dashed line(slope = 1, intercept = 0), which is almost the case here. The dots are further away from the dashed line when the predicted/true probability goes higher. The reason behind this could be the small sample size there. Perhaps robust regression could help with this matter in future explorations.  
+```{r calibration}
+#Calibration plot
+df_cal <- df_train1 %>% 
+  add_predictions(gam_mod_xy, var = 'pred_prob', type = 'response')
+
+df_cal <- df_cal %>% 
+  mutate(ProbBin = cut(df_cal$pred_prob, seq(0, 0.18, .01)))
+
+mid_point <- seq(0.005, 0.175, 0.01)
+
+cal_summary <- df_cal %>% 
+  group_by(ProbBin) %>% 
+  summarize(SM_Prob = mean(as.numeric(SwingAndMiss)),
+            n = n()) %>% 
+  mutate(BinPoint = mid_point)
+
+ggplot(cal_summary, aes(x = BinPoint, y = SM_Prob, size = n)) +
+  geom_point() +
+  xlab("Predicted Probability") +
+  ylab("True Probability") +
+  geom_abline(slope = 1, intercept = 0, linetype = 'dashed') +
+  ggtitle("Figure 6")
+```
+
+**SMAA and Split Half Correlation**    
+Below Figure 7 shows how much more or less swing and misses the pitcher generated compared to what the model predicted based on plate location and pitcher/batter handedness. SMAA means the swing and miss above average. Here we can see how this skill changes from 2018 to 2019 for the pitchers in the dataset.  
+```{r player SMAA}
+
+df_player <- df_train1 %>% 
+  add_predictions(gam_mod_xy, var = 'pred_prob', type = 'response') %>% 
+  mutate(SMAboveAvg = SwingAndMiss - pred_prob)
+
+df_summary <- df_player %>% 
+  group_by(Pitcher_ID, Pitcher, Season) %>% 
+  summarize(SMAA = sum(SMAboveAvg, na.rm = T), 
+            n = n(),
+            SMAAPerPitch = SMAA/n) 
+
+df_split_half <- df_summary %>% 
+  mutate(Yr_plus1 = Season + 1) %>% 
+  inner_join(df_summary, by = c('Yr_plus1' = 'Season', 'Pitcher_ID', 'Pitcher'))
+
+ggplot(df_split_half, aes(x= SMAAPerPitch.x, y = SMAAPerPitch.y)) +
+  geom_point(alpha = 0.2) +
+  xlab("SMAAPerCB in 2018") +
+  ylab("SMAAPerCB in 2019") +
+  geom_text_repel(size = 3, aes(label = Pitcher), force_pull = 0.1) +
+  ggtitle("Figure 7")
+```
+
+Then To check how reliable this SMAA (swing and miss above average) metric is, we will also do some split half correlations between the two seasons. However, the dataset here only has 2083 instances. Thus the split half correlations are not that intuitive or significant.   
+```{r split half correlation}
+split_half_correlation <- function(df, n, metric, playerIdCol = "PlayerId", seed = 1){
+  
+  set.seed(seed)
+ 
+  df_shc <- df %>% 
+    dplyr::filter(is.na(!!as.name(metric)) == FALSE) %>%
+    group_by(!!as.name(playerIdCol), Season) %>% 
+    mutate(num = n()) %>% 
+    dplyr::filter(num >= n * 2)
+  
+  if(nrow(df_shc) > 0){
+    df_shc <- df_shc %>% 
+      sample_n(n * 2) %>% 
+      arrange(!!as.name(playerIdCol), Season) %>% 
+      mutate(group = c(rep(1, n), rep(2, n))) %>% 
+      group_by(!!as.name(playerIdCol), Season, group) %>% 
+      summarize(Metric = mean(!!as.name(metric))) %>% 
+      ungroup() %>% 
+      pivot_wider(id_cols = c(playerIdCol, 'Season'), 
+                  names_from = c('group'), 
+                  values_from = c('Metric')) %>% 
+      summarize(cor_Metric = cor(`1`, `2`))
+  } else {
+    df_shc <- data.frame(cor_Metric = NA)
+  }
+  
+  df_shc$Skill <- metric
+  df_shc$n <- n
+  
+  return(df_shc)
+}
+```
+
+```{r search for min sample size}
+find_min_sample_sizes <- function(df_shc, benchmark = 0.7, min_acceptable = 0.5, print = TRUE){
+  
+  min_sample_sizes <- df_shc %>%
+    filter(cor_Metric >= min_acceptable) %>% 
+    group_by(Skill) %>% 
+    mutate(maxCor = max(cor_Metric), 
+           hasAboveThreshold = ifelse(maxCor >= benchmark, 1, 0), 
+           isAboveThreshold = ifelse(cor_Metric >= benchmark, 1, 0)) %>% 
+    filter(!(hasAboveThreshold == 1 & isAboveThreshold == 0)) %>% 
+    group_by(Skill, hasAboveThreshold, isAboveThreshold) %>% 
+    summarize(minN = min(n), 
+              maxN = max(n)) %>% 
+    ungroup() %>% 
+    mutate(min_sample_size = ifelse(hasAboveThreshold == 0, maxN, minN)) %>% 
+    dplyr::select(Skill, min_sample_size) %>% 
+    tibble::column_to_rownames(var = 'Skill')
+  
+  if(print == TRUE){
+    print(df_shc %>% 
+            ggplot(aes(x=n, y=cor_Metric, color=Skill)) + 
+            geom_line(size=1) + 
+            geom_hline(yintercept = .7))
+  }
+  
+  
+  return(min_sample_sizes)
+  
+}
+```
+
+As from below, the correlation plot does look a bit weird. Normally it would go from zero and then gradually increases. But again the number of instances are probably just way too small in this project. It's still good exercise though.  
+```{r find min sample size}
+# Iterate through metrics/split-halves
+list_n <- seq(10, 80, 10)
+list_shc <- list()
+i <- 1
+
+metric <- 'SMAboveAvg'
+
+
+
+  for(n in list_n) {
+    message(paste0(metric, ' - ', n))
+    tmp_shc <- split_half_correlation(df = df_player, 
+                                      n = n, 
+                                      metric = metric, 
+                                      playerIdCol = "Pitcher_ID")
+    list_shc[[i]] <- tmp_shc
+    i <- i+1
+  }   
+
+
+# Remove data points where the SHC is too unstable
+df_shc <- as.data.frame(data.table::rbindlist(list_shc))
+
+# Find, visualize (for validation purposes)
+min_sample_sizes <- find_min_sample_sizes(df_shc = df_shc, 
+                                          benchmark = 0.7, 
+                                          min_acceptable = 0.5)
+```
+
+### Random Forest and XGBoost Model  
+Then we will move on to building random forest and xgboost models, both using plate location and pitcher/batter handedness as independent variables to compare with the gam model with interaction terms.  
+```{r rf and xgboost}
+#Rename the stepwise logistic regression model
+init_mod <- step.model
+
+df_train1 <- df_train1 %>% 
+  mutate(SwingAndMiss_Factor = as.factor(SwingAndMiss))
+
+#Build the random forest model
+caret_rf <- caret::train(
+  SwingAndMiss_Factor ~ plate_x * plate_z + PitchAndBatSide,
+  data = df_train1,
+  method = 'rf',
+  family = 'binomial',
+  verbosity = 0
+)
+
+#Build the xgboost model
+caret_xgb <- caret::train(
+  SwingAndMiss_Factor ~ plate_x * plate_z + PitchAndBatSide,
+  data = df_train1,
+  method = 'xgbTree',
+  family = 'binomial',
+  verbosity = 0
+)
+```
+
+```{r rf and xgboost df}
+df_grid <- expand.grid(plate_z = seq(-2, 6, .1), plate_x = seq(-3,3,.1), PitchAndBatSide = c("L,L", "L,R", "R,L", "R,R")) 
+
+# Random Forest prediction
+pred_rf <- predict(caret_rf, newdata = df_grid, type = 'prob') %>% 
+  rename(pred_prob = `1`)
+
+df_grid_rf <- cbind(df_grid, pred_rf)
+
+# XGB prediction
+pred_xgb <- predict(caret_xgb, newdata = df_grid, type = 'prob') %>% 
+  rename(pred_prob = `1`)
+
+df_grid_xgb <- cbind(df_grid, pred_xgb)
+                     
+# GAM prediction
+df_grid_gam <- df_grid %>% 
+  add_predictions(gam_mod_xy, var = 'pred_logit') %>% 
+  add_predictions(gam_mod_xy, var = 'pred_prob', type = 'response')
+```
+
+From Figure 8, 9, 10 below you will be interested in the relationship between cb swing and miss prediction and plate locations by different handedness and models (GAM, XGBoost, Random Forest, respectively). In Figure 11, you'll see the actual swing and miss rate based on plate location. Also in Figure 11, we could solidify our belief that plate_x and plate_z are indeed related. Generally from these plots, it's still **vertically throwing at the lower half of the strikezone or out of the strike zone** and **horizontally throwing at the left handed batter side** being more effective. Also, **LHP throwing further down and out againt RHB** could have surprising good effect in generating swing and misses.  
+```{r rf and xgboost plots}
+
+ggplot(df_grid_gam, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
+  geom_raster() +
+  geom_contour() + 
+  coord_fixed() +
+  labs(title = 'GAM') +
+  facet_wrap(vars(PitchAndBatSide)) +
+  ggtitle("Figure 8")
+
+ggplot(df_grid_xgb, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
+  geom_raster() +
+  geom_contour() + 
+  coord_fixed() +
+  labs(title = 'XGBoost Tree') +
+  facet_wrap(vars(PitchAndBatSide)) +
+  ggtitle("Figure 9")
+
+ggplot(df_grid_rf, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
+  geom_raster() + 
+  geom_contour() + 
+  coord_fixed() +
+  labs(title = 'Random Forest Model') +
+  facet_wrap(vars(PitchAndBatSide)) +
+  ggtitle("Figure 10")
+
+ggplot(df_train1 %>% filter(!is.na(plate_z), !is.na(plate_x)),
+       aes(x = plate_x, y = plate_z, z = SwingAndMiss)) +
+  stat_summary_2d() +
+  xlim(-3,3) +
+  ylim(-2,6) +
+  coord_fixed() +
+  scale_fill_gradient() +
+  labs(title = 'Data Summary') +
+  facet_wrap(vars(PitchAndBatSide)) +
+  ggtitle("Figure 11")
+```
+
+Then below you'll be interested in the estimates of the gam, random forest and xgboost models, respectively. These estimates can be used for calculating the true talent of a pitcher generating swing and miss with his curveballs compared to others throwing at the same location. Basically what we're doing here is that we're breaking down the prediction into components, one of which is true talent and the other is regression to the mean. So If we have a lot of CB thrown we can be much more confident that our prediction is a reflection of your true skill and rely less on regression to the mean, whereas if we don't have a lot of data we have to essentially add average data to get that prediction, which means it's heavily relying on regression to the mean. We will focus on the estimate in the Random Forest model since the p-value is lowest here. At the end of this section, there is a leaderboard for the true talent of this skill.   
+```{r rf and xgboost prediction}
+df_pred <- df_train1 %>% filter(!is.na(plate_z), !is.na(plate_x))
+
+# Random Forest Prediction
+pred_rf <- predict(caret_rf, newdata = df_pred, type = 'prob') %>% 
+  rename(prob_rf = `1`) %>% 
+  dplyr::select(prob_rf)
+
+df_pred <- cbind(df_pred, pred_rf)
+
+# XGB Prediction
+pred_xgb <- predict(caret_xgb, newdata = df_train1, type = 'prob') %>% 
+  rename(prob_xgb = `1`) %>% 
+  dplyr::select(prob_xgb)
+
+df_pred <- cbind(df_pred, pred_xgb)
+                     
+# GAM Prediction
+df_pred <- df_pred %>% 
+  add_predictions(gam_mod_xy, var = 'prob_gam', type = 'response')
+```
+
+```{r rf and xgboost SMAA}
+#rf and xgboost SMAA
+df_player <- df_pred %>% 
+  group_by(Pitcher_ID, Pitcher, Season) %>% 
+  summarize(
+    n = n(),
+    ActualSM = sum(SwingAndMiss),
+    expSM_gam = sum(prob_gam),
+    expSM_xgb = sum(prob_xgb),
+    expSM_rf = sum(prob_rf),
+    .groups = 'drop')
+
+df_player <- df_player %>% 
+  mutate(
+    SMAA_gam = ActualSM - expSM_gam,
+    SMAA_xgb = ActualSM - expSM_xgb,
+    SMAA_rf = ActualSM - expSM_rf
+  )
+```
+
+```{r rf and xgboost estimates}
+set.seed(246)
+#rf and xgboost estimates
+df_player_sh <- df_pred %>% 
+  mutate(
+    SMAA_gam = SwingAndMiss - prob_gam,
+    SMAA_xgb = SwingAndMiss - prob_xgb,
+    SMAA_rf = SwingAndMiss - prob_rf,
+    sh = rbinom(nrow(df_pred), 1, 0.5)
+         ) %>% 
+  filter(!is.na(SMAA_gam)) %>%
+  group_by(Pitcher_ID, Season, sh) %>%
+  summarize(
+    SMAA_gam = sum(SMAA_gam, na.rm=T),
+    SMAA_xgb = sum(SMAA_xgb, na.rm=T),
+    SMAA_rf = sum(SMAA_rf, na.rm=T),
+    n = n()
+  ) %>%
+  mutate(other_sh = 1-sh) %>%
+  ungroup()
+
+df_player_sh_train <- df_player_sh %>%
+  filter(sh ==0) %>%
+  filter(n > 50) %>%
+  inner_join(df_player_sh, by=c('Pitcher_ID', 'Season', 'sh'='other_sh'), suffix=c('.sh1','.sh2')) %>%
+  mutate(eff_wt = pmin(n.sh1, n.sh2))
+
+regression_mod <- nls(
+  I(SMAA_gam.sh1 / n.sh1) ~ (SMAA_gam.sh2 + 0 * ballast)/(n.sh2 + ballast),
+  data = df_player_sh_train,
+  start = list(ballast=1000),
+  lower = list(ballast=10),
+  weights = eff_wt
+)
+
+summary(regression_mod)
+
+regression_mod <- nls(
+  I(SMAA_xgb.sh1 / n.sh1) ~ (SMAA_xgb.sh2 + 0 * ballast)/(n.sh2 + ballast),
+  data = df_player_sh_train,
+  start = list(ballast=1000),
+  lower = list(ballast=10),
+  weights = eff_wt
+)
+
+summary(regression_mod)
+
+regression_mod <- nls(
+  I(SMAA_rf.sh1 / n.sh1) ~ (SMAA_rf.sh2 + 0 * ballast)/(n.sh2 + ballast),
+  data = df_player_sh_train,
+  start = list(ballast=1000),
+  lower = list(ballast=10),
+  weights = eff_wt
+)
+
+summary(regression_mod)
+```
+
+```{r gam true talent}
+#rf true talent
+df_player %>% 
+  mutate(
+    SM_Talent = SMAA_rf/(n+50),
+    Regression = 50/(50+n)) %>%
+  dplyr::select(Pitcher, Season, SM_Talent) %>%
+  arrange(-SM_Talent)
+```
+
+### Linear Mixed Models  
+In additional to pitch and bat side, individual pitcher could affect the models too. In this dataset, data could violate the assumption of being independent and identically distributed. Thus, here we will try a mixed model with Pitcher_Throws, Pitcher_ID and Batter_Hits being random effects, also plate location being fixed effects. From below, we can see that the variance for Pitcher_ID:Pitcher_Throws = 1.104e-01. It explains most of the variation from the random effects, which is the variance that’s “left over” after the variance explained by our fixed effects. This implies that who the pitcher is could affect the prediction, which lines up with why we came up with the true talent leaderboard. As for plate location, the estimates being negative still tells us the similar outcome as previous: Throwing at the lower part of the strike zone or even lower than the strike zone vertically and throwing close to the left handed batter side could generate more whiffs.  
+```{r lme}
+glmer <- glmer(SwingAndMiss ~ plate_x*plate_z + (1 | Pitcher_Throws/Pitcher_ID) + (1 | Batter_Hits),
+  data = df_train1, family = binomial, nAGQ=1)
+
+summary(glmer)
+```
+
+### Takeaways  
+1. From nearly all of the models, plate location contributes a lot to the prediction of a curveball generating swing and miss or not.  
+2. Generally, throwing at the lower part of the strike zone or even lower than the strike zone vertically and throwing close to the left handed batter side horizontally could generate more whiffs.  
+3. LHP throwing further down and out against RHB could have surprising good effect in generating swing and misses.  
+4. Who the pitcher is affects how strong this phenomenon is. We can see the true talent for this "skill" for the pitchers in the dataset in the leaderboard. However, the sample size is small here. More instances should give us more confidence in this.  
+
+### Some Limitations and Potential Future Steps  
+-   CBs could be less effective at generating swing and misses than say SLs, so maybe it is more important for some pitchers to be able to locate that pitch in the zone. Focusing on the swing and miss of curveballs could be misleading since in some cases pitchers probably aren't really trying to get a swing and miss, they're only trying to loop that thing in the zone for a called first strike.  
+-   Add more instances to the dataset.  
+-   Add more predictors to gam or mixed model and more explorations/visualizations   
+-   More All encompassing models (Random forest, XGB) and Interpretation  
+    -   Global Model-Agnostic Methods
+        -   The partial dependence plot  
+        -   Accumulated local effect plots  
+        -   Permutation feature importance  
+    -   Local Model-Agnostic Methods  
+        -   Individual conditional expectation curves  
+        -   Local surrogate models (LIME)  
+        -   Counterfactual explanations  
+        -   Shapley values  
