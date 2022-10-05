@@ -312,7 +312,7 @@ AIC(gam_mod, gam_mod_xy)
 ```
 
 **Calibration Plot**    
-In Figure 6 below I will bin the predicted probabilities from the **gam_mod_xy** into groups, check the number of instances in each group and calculate the actual swing and miss rate for each group, which is the concept of a calibration plot. A good model would have the dots close to the dashed line(slope = 1, intercept = 0), which is almost the case here. The dots are further away from the dashed line when the predicted/true probability goes higher. The reason behind this could be the small sample size there. Perhaps robust regression could help with this matter in future explorations.  
+In Figure 6 below I will bin the predicted probabilities from the **gam_mod_xy** into groups, check the number of instances in each group and calculate the actual swing and miss rate for each group, which is the concept of a calibration plot. A good model would have the dots close to the dashed line(slope = 1, intercept = 0), which is almost the case here. The dots are further away from the dashed line when the predicted/true probability goes higher. The reason behind this could be the small sample size there. Perhaps robust regression could help with this matter in future explorations. Also, the fact that the predicted probability tends to be higher than observed probability in low probability instances and lower in high probability instances tells us that there may be underfitting issues, which is why in later section we will fit random forest model and xgboost model too.  
 ```{r calibration}
 #Calibration plot
 df_cal <- df_train1 %>% 
@@ -680,11 +680,11 @@ summary(glmer)
 -   Add more predictors to gam or mixed model and more explorations/visualizations   
 -   More All encompassing models (Random forest, XGB) and Interpretation  
     -   Global Model-Agnostic Methods
-        -   The partial dependence plot  
-        -   Accumulated local effect plots  
-        -   Permutation feature importance  
+        -   The partial dependence plot: a feature effect method.  
+        -   Accumulated local effect plots: another feature effect method that works when features are dependent.    
+        -   Permutation feature importance: it measures the importance of a feature as an increase in loss when the feature is permuted.    
     -   Local Model-Agnostic Methods  
-        -   Individual conditional expectation curves  
-        -   Local surrogate models (LIME)  
-        -   Counterfactual explanations  
-        -   Shapley values  
+        -   Individual conditional expectation curves: they are the building blocks for partial dependence plots and describe how changing a feature changes the prediction.    
+        -   Local surrogate models (LIME): explain a prediction by replacing the complex model with a locally interpretable surrogate model.    
+        -   Counterfactual explanations: explain a prediction by examining which features would need to be changed to achieve a desired prediction.    
+        -   Shapley values: are an attribution method that fairly assigns the prediction to individual features.    
