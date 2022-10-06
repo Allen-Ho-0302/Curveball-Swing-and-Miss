@@ -111,7 +111,8 @@ plot_df <- df_cb %>%
 ggplot(plot_df, aes(x = value, y = ..count..)) +
   geom_histogram(bins = 30, color ='black', fill = 'lightblue') +
   facet_wrap(vars(Variable), scales = 'free') +
-  ggtitle("Figure 1")
+  ggtitle("Figure 1") +
+  theme_classic()
 ```
 
 ```{r distribution plots 2}
@@ -126,7 +127,8 @@ plot_df2 <- df_cb %>%
 ggplot(plot_df2, aes(x = value, y = ..count..)) +
   geom_histogram(bins = 30, fill = 'lightblue', color = 'black') +
   facet_grid(cols = vars(Variable), rows = vars(Pitcher_Throws), scales = 'free') +
-  ggtitle("Figure 2")
+  ggtitle("Figure 2") +
+  theme_classic()
 ```
 
 The thing that stood out here is that standardizing horizontal release position(release_pos_x), spin direction(spin_dir) and horizontal movement(x_movement) for pitcher handedness(Pitcher_Throws) could be worth considering. However, since our dataset also includes batting side(Batter_Hits), I want to put both Pitcher_Throws and Batter_Hits into the logistic regression models later to take into account the platoon splits. Thus, I decided to not standardizing these three variables here. Keep in mind that the plate location plot in the whole project is from **pitcher's view**.  
@@ -137,7 +139,8 @@ ggplot(df_cb %>% filter(Pitch_Outcome %in% c('BallCalled', 'StrikeSwinging', 'St
        aes(x= plate_x, y = plate_z)) +
   geom_point(color ='black') +
   facet_wrap(vars(Pitch_Outcome)) +
-  ggtitle("Figure 3: Plate Location from Pitcher's View")
+  ggtitle("Figure 3: Plate Location from Pitcher's View") +
+  theme_classic()
 ```
 
 From Figure 3 above, we can see that plate_z seems to be highly correlated with CB whiff rate. The whiffs were located mostly at the lower half of the strike zone or those lower and outside of the strike zone.  
@@ -271,7 +274,8 @@ ggplot(df_grid, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) 
   geom_raster() +
   geom_contour() +
   facet_wrap(vars(PitchAndBatSide))  +
-  ggtitle("Figure 4")
+  ggtitle("Figure 4") +
+  theme_classic()
 ```
 
 **GAM with Interaction Between Smoothed Variables**  
@@ -302,7 +306,8 @@ ggplot(df_grid, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) 
   geom_contour() +
   coord_fixed() +
   facet_wrap(vars(PitchAndBatSide)) +
-  ggtitle("Figure 5")
+  ggtitle("Figure 5") +
+  theme_classic()
 ```
 
 One thing though, is that the model with the interaction between s(plate_x) and s(plate_z) has a higher AIC, which means including this interaction does not improve our model’s performance. But still, it was close and reasonable to think that some non-linear interaction effect could actually be the real case in baseball and help with our prediction going forward.  
@@ -334,7 +339,8 @@ ggplot(cal_summary, aes(x = BinPoint, y = SM_Prob, size = n)) +
   xlab("Predicted Probability") +
   ylab("True Probability") +
   geom_abline(slope = 1, intercept = 0, linetype = 'dashed') +
-  ggtitle("Figure 6")
+  ggtitle("Figure 6") +
+  theme_classic()
 ```
 
 **SMAA and Split Half Correlation**    
@@ -360,7 +366,8 @@ ggplot(df_split_half, aes(x= SMAAPerPitch.x, y = SMAAPerPitch.y)) +
   xlab("SMAAPerCB in 2018") +
   ylab("SMAAPerCB in 2019") +
   geom_text_repel(size = 3, aes(label = Pitcher), force_pull = 0.1) +
-  ggtitle("Figure 7")
+  ggtitle("Figure 7") +
+  theme_classic()
 ```
 
 Then To check how reliable this SMAA (swing and miss above average) metric is, we will also do some split half correlations between the two seasons. However, the dataset here only has 2083 instances. Thus the split half correlations are not that intuitive or significant.   
@@ -420,7 +427,8 @@ find_min_sample_sizes <- function(df_shc, benchmark = 0.7, min_acceptable = 0.5,
     print(df_shc %>% 
             ggplot(aes(x=n, y=cor_Metric, color=Skill)) + 
             geom_line(size=1) + 
-            geom_hline(yintercept = .7))
+            geom_hline(yintercept = .7) +
+            theme_classic())
   }
   
   
@@ -518,7 +526,8 @@ ggplot(df_grid_gam, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_pro
   coord_fixed() +
   labs(title = 'GAM') +
   facet_wrap(vars(PitchAndBatSide)) +
-  ggtitle("Figure 8")
+  ggtitle("Figure 8") +
+  theme_classic()
 ```
 
 One thing interesting to point out here is that the prediction from random forest and xgboost are both somewhat discrete. It could be because of their tree structure. Trees fail to deal with linear relationships. Any linear relationship between an input feature and the outcome has to be approximated by splits, creating a step function. This is not efficient. This goes hand in hand with lack of smoothness. Slight changes in the input feature can have a big impact on the predicted outcome, which is usually not desirable.  
@@ -529,7 +538,8 @@ ggplot(df_grid_rf, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob
   coord_fixed() +
   labs(title = 'Random Forest Model') +
   facet_wrap(vars(PitchAndBatSide)) +
-  ggtitle("Figure 9")
+  ggtitle("Figure 9") +
+  theme_classic()
 ```
 
 ```{r xgboost plot}
@@ -539,7 +549,8 @@ ggplot(df_grid_xgb, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_pro
   coord_fixed() +
   labs(title = 'XGBoost Tree') +
   facet_wrap(vars(PitchAndBatSide)) +
-  ggtitle("Figure 10")
+  ggtitle("Figure 10") +
+  theme_classic()
 ```
 
 ```{r actual swing and miss rate}
@@ -552,7 +563,8 @@ ggplot(df_train1 %>% filter(!is.na(plate_z), !is.na(plate_x)),
   scale_fill_gradient() +
   labs(title = 'Data Summary') +
   facet_wrap(vars(PitchAndBatSide)) +
-  ggtitle("Figure 11")
+  ggtitle("Figure 11") +
+  theme_classic()
 ```
 
 Then below you'll be interested in the estimates of the gam, random forest and xgboost models, respectively. These estimates can be used for calculating the true talent of a pitcher generating swing and miss with his curveballs compared to others throwing at the same location. Basically what we're doing here is that we're breaking down the prediction into components, one of which is true talent and the other is regression to the mean. So If we have a lot of CB thrown we can be much more confident that our prediction is a reflection of your true skill and rely less on regression to the mean, whereas if we don't have a lot of data we have to essentially add average data to get that prediction, which means it's heavily relying on regression to the mean. We will focus on the estimate in the Random Forest model since the p-value is lowest here. At the end of this section, there is a leaderboard for the true talent of this skill.   
