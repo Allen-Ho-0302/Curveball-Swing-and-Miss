@@ -312,7 +312,7 @@ AIC(gam_mod, gam_mod_xy)
 ```
 
 **Calibration Plot**    
-In Figure 6 below I will bin the predicted probabilities from the **gam_mod_xy** into groups, check the number of instances in each group and calculate the actual swing and miss rate for each group, which is the concept of a calibration plot. A good model would have the dots close to the dashed line(slope = 1, intercept = 0), which is almost the case here. The dots are further away from the dashed line when the predicted/true probability goes higher. The reason behind this could be the small sample size there. Perhaps robust regression could help with this matter in future explorations. Also, the fact that the predicted probability tends to be higher than observed probability in low probability instances and lower in high probability instances tells us that there may be underfitting issues, which is why in later section we will fit random forest model and xgboost model too.  
+In Figure 6 below I will bin the predicted probabilities from the **gam_mod_xy** into groups, check the number of instances in each group and calculate the actual swing and miss rate for each group, which is the concept of a calibration plot. A good model would have the dots close to the dashed line(slope = 1, intercept = 0), which is almost the case here. The dots are further away from the dashed line when the predicted/true probability goes higher. The reason behind this could be the small sample size there. Perhaps robust regression could help with this matter in future explorations. Also, the fact that the predicted probability tends to be higher than observed probability in low probability instances and lower in high probability instances tells us that there may be underfitting issues, which is why in later section we will fit more complex models like random forest model and xgboost model too.  
 ```{r calibration}
 #Calibration plot
 df_cal <- df_train1 %>% 
@@ -461,7 +461,7 @@ min_sample_sizes <- find_min_sample_sizes(df_shc = df_shc,
 ```
 
 ### Random Forest and XGBoost Model  
-Then we will move on to building random forest and xgboost models, both using plate location and pitcher/batter handedness as independent variables to compare with the gam model with interaction terms.  
+Then we will move on to building random forest and xgboost models, both using plate location and pitcher/batter handedness as independent variables to compare with the gam model with interaction terms. The reason I chose random forest is because its tree structure is ideal for capturing interactions between features in the data. Random Forest builds trees independently, and the results are aggregated into a single result at the end. The concept of collective intelligence here is another advantage. As for xgboost, the decision trees are built additively. Each tree is built one after another. It aggregates the results of each decision tree along the way to calculate the final result. It is less prone to overfitting because of its advanced regularization too.  
 ```{r rf and xgboost}
 #Rename the stepwise logistic regression model
 init_mod <- step.model
@@ -519,23 +519,30 @@ ggplot(df_grid_gam, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_pro
   labs(title = 'GAM') +
   facet_wrap(vars(PitchAndBatSide)) +
   ggtitle("Figure 8")
+```
 
-ggplot(df_grid_xgb, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
-  geom_raster() +
-  geom_contour() + 
-  coord_fixed() +
-  labs(title = 'XGBoost Tree') +
-  facet_wrap(vars(PitchAndBatSide)) +
-  ggtitle("Figure 9")
-
+One thing interesting to point out here is that the prediction from random forest and xgboost are both somewhat discrete. It could be because of their tree structure. Trees fail to deal with linear relationships. Any linear relationship between an input feature and the outcome has to be approximated by splits, creating a step function. This is not efficient. This goes hand in hand with lack of smoothness. Slight changes in the input feature can have a big impact on the predicted outcome, which is usually not desirable.  
+```{r rf plot}
 ggplot(df_grid_rf, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
   geom_raster() + 
   geom_contour() + 
   coord_fixed() +
   labs(title = 'Random Forest Model') +
   facet_wrap(vars(PitchAndBatSide)) +
-  ggtitle("Figure 10")
+  ggtitle("Figure 9")
+```
 
+```{r xgboost plot}
+ggplot(df_grid_xgb, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
+  geom_raster() +
+  geom_contour() + 
+  coord_fixed() +
+  labs(title = 'XGBoost Tree') +
+  facet_wrap(vars(PitchAndBatSide)) +
+  ggtitle("Figure 10")
+```
+
+```{r actual swing and miss rate}
 ggplot(df_train1 %>% filter(!is.na(plate_z), !is.na(plate_x)),
        aes(x = plate_x, y = plate_z, z = SwingAndMiss)) +
   stat_summary_2d() +
@@ -673,12 +680,13 @@ summary(glmer)
 2. Generally, throwing at the lower part of the strike zone or even lower than the strike zone vertically and throwing close to the left handed batter side horizontally could generate more whiffs.  
 3. LHP throwing further down and out against RHB could have surprising good effect in generating swing and misses.  
 4. Who the pitcher is affects how strong this phenomenon is. We can see the true talent for this "skill" for the pitchers in the dataset in the leaderboard. However, the sample size is small here. More instances should give us more confidence in this.  
+5. A summary here about how we go from logistic regression to xgboost: We started with a simple and interpretable algorithm in logistic regression. The result was fine, and we got some valuable interpretation. However, there could be non-linear relationship. Thus, we went to GAM. We captured some valuable non-linear relationship and interaction. However, there are still some underfitting issues, which brought us to more complex models in random forest and xgboost. The prediction we got from these two complex models are a bit discrete, which is representative of their tree structure. However, the random forest model was still most powerful in helping us with the true talent calculations. Hopefully with these models, we not only had some good interpretations, but also accurate predictions.     
 
 ### Some Limitations and Potential Future Steps  
 -   CBs could be less effective at generating swing and misses than say SLs, so maybe it is more important for some pitchers to be able to locate that pitch in the zone. Focusing on the swing and miss of curveballs could be misleading since in some cases pitchers probably aren't really trying to get a swing and miss, they're only trying to loop that thing in the zone for a called first strike.  
 -   Add more instances to the dataset.  
 -   Add more predictors to gam or mixed model and more explorations/visualizations   
--   More All encompassing models (Random forest, XGB) and Interpretation  
+-   More All encompassing models (Random forest, XGB, LightGBM) and Interpretation  
     -   Global Model-Agnostic Methods
         -   The partial dependence plot: a feature effect method.  
         -   Accumulated local effect plots: another feature effect method that works when features are dependent.    
