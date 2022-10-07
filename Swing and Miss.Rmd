@@ -28,7 +28,7 @@ Create a model to evaluate pitcher's ability to generate swing and miss(whiff) w
 - plate_x: The horizontal location of the ball when it crosses home plate (ft)  
 - plate_z: The vertical location of the ball when it crosses home plate (ft)  
 
-There are also a few context features like innings, strikes, runners, outs in this dataset. However, in this project we will focus more on the above features first.  
+There are also a few context features like innings, strikes, runners, outs in this dataset. However, in this project we will focus more on the above features.  
 
 ### Steps    
 - Data Preprocessing  
@@ -151,7 +151,7 @@ summary(as.factor(df_cb$Pitch_Outcome))
 As from above, there are six types of pitch outcome in this dataset.  
 
 ### Initial Logistic Regression Models  
-We will start with two logistic regression models with stepwise feature selection. The dependent variable of the first model will be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of BallCalled, FoulBall, InPlay or StrikeCalled. By this, we get to expect **if the pitch will generate a whiff based on the features given**. In Model 2, the dependent variable will also be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of Foul Ball or InPlay. In this second model, we get to expect **if the pitch will generate a whiff given that the batters swing at the pitch based on the features given**. Both models have their own intention. Although traditionally swing and miss rate is defined as the pitches hitters swing and miss at divided by total pitches thrown by a pitcher(Model 2), here we will actually focus a bit more on Model 1 because Model 1 here has the higher accuracy as from below (0.89 in Model1 and 0.77 in Model2), and also intuitively, we could want our pitchers to throw a pitch that both gets the batter to swing and then miss.  
+We will start with two logistic regression models with stepwise feature selection. The dependent variable of the first model will be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of BallCalled, FoulBall, InPlay or StrikeCalled. By this, we get to expect **if the pitch will generate a whiff based on the features given**. In Model 2, the dependent variable will also be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of Foul Ball or InPlay. In this second model, we get to expect **if the pitch will generate a whiff given that the batters swing at the pitch based on the features given**. Both models have their own intentions. Although traditionally swing and miss rate is defined as the pitches hitters swing and miss at divided by total pitches thrown by a pitcher(Model 2), here we will actually focus a bit more on Model 1 because Model 1 here has the higher accuracy as from below (0.89 in Model1 and 0.77 in Model2), and also intuitively, we could want our pitchers to throw a pitch that both gets the batter to swing and then miss.  
 
 **Logistic Regression Model 1**    
 ```{r logistic regression model 1}
@@ -517,7 +517,7 @@ df_grid_gam <- df_grid %>%
   add_predictions(gam_mod_xy, var = 'pred_prob', type = 'response')
 ```
 
-From Figure 8, 9, 10 below you will be interested in the relationship between cb swing and miss prediction and plate locations by different handedness and models (GAM, XGBoost, Random Forest, respectively). In Figure 11, you'll see the actual swing and miss rate based on plate location. Also in Figure 11, we could solidify our belief that plate_x and plate_z are indeed related. Generally from these plots, it's still **vertically throwing at the lower half of the strikezone or out of the strike zone** and **horizontally throwing at the left handed batter side** being more effective. Also, **LHP throwing further down and out againt RHB** could have surprising good effect in generating swing and misses.  
+From Figure 8, 9, 10 below you will be interested in the relationship between cb swing and miss prediction and plate locations by different handedness and models (GAM, Random Forest and xgboost, respectively). In Figure 11, you'll see the actual swing and miss rate based on plate location. Also in Figure 11, we could solidify our belief that plate_x and plate_z are indeed related. Generally from these plots, it's still **vertically throwing at the lower half of the strikezone or out of the strike zone** and **horizontally throwing at the left handed batter side** being more effective. Also, **LHP throwing further down and out againt RHB** could have surprising good effect in generating swings and misses.  
 ```{r rf and xgboost plots}
 
 ggplot(df_grid_gam, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
@@ -648,7 +648,7 @@ regression_mod <- nls(
 summary(regression_mod)
 
 regression_mod <- nls(
-  I(SMAA_xgb.sh1 / n.sh1) ~ (SMAA_xgb.sh2 + 0 * ballast)/(n.sh2 + ballast),
+  I(SMAA_rf.sh1 / n.sh1) ~ (SMAA_rf.sh2 + 0 * ballast)/(n.sh2 + ballast),
   data = df_player_sh_train,
   start = list(ballast=1000),
   lower = list(ballast=10),
@@ -658,7 +658,7 @@ regression_mod <- nls(
 summary(regression_mod)
 
 regression_mod <- nls(
-  I(SMAA_rf.sh1 / n.sh1) ~ (SMAA_rf.sh2 + 0 * ballast)/(n.sh2 + ballast),
+  I(SMAA_xgb.sh1 / n.sh1) ~ (SMAA_xgb.sh2 + 0 * ballast)/(n.sh2 + ballast),
   data = df_player_sh_train,
   start = list(ballast=1000),
   lower = list(ballast=10),
@@ -692,13 +692,13 @@ summary(glmer)
 2. Generally, throwing at the lower part of the strike zone or even lower than the strike zone vertically and throwing close to the left handed batter side horizontally could generate more whiffs.  
 3. LHP throwing further down and out against RHB could have surprising good effect in generating swing and misses.  
 4. Who the pitcher is affects how strong this phenomenon is. We can see the true talent for this "skill" for the pitchers in the dataset in the leaderboard. However, the sample size is small here. More instances should give us more confidence in this.  
-5. A summary here about how we go from logistic regression to xgboost: We started with a simple and interpretable algorithm in logistic regression. The result was fine, and we got some valuable interpretation. However, there could be non-linear relationship. Thus, we went to GAM. We captured some valuable non-linear relationship and interaction. However, there are still some underfitting issues, which brought us to more complex models in random forest and xgboost. The prediction we got from these two complex models are a bit discrete, which is representative of their tree structure. However, the random forest model was still most powerful in helping us with the true talent calculations. Hopefully with these models, we not only had some good interpretations, but also accurate predictions.     
+5. A summary here about how we go from logistic regression to xgboost: We started with a simple and interpretable algorithm in logistic regression. The result was fine, and we got some valuable interpretation. However, there could be non-linear relationship. Thus, we went to GAM. We captured some valuable non-linear relationship and interaction. However, there are still some underfitting issues, which brought us to more complex models in random forest and xgboost. The prediction we got from these two complex models are a bit discrete, which is representative of their tree structure. However, the random forest model was still most powerful in helping us with the true talent calculations. Lastly, we used the mixed model to confirm our findings and justify the action of calculating the true talent of this skill. Hopefully with these models, we not only had some good interpretations, but also accurate predictions.     
 
 ### Some Limitations and Potential Future Steps  
 -   CBs could be less effective at generating swing and misses than say SLs, so maybe it is more important for some pitchers to be able to locate that pitch in the zone. Focusing on the swing and miss of curveballs could be misleading since in some cases pitchers probably aren't really trying to get a swing and miss, they're only trying to loop that thing in the zone for a called first strike.  
 -   Add more instances to the dataset.  
--   Add more predictors to gam or mixed model and more explorations/visualizations   
--   More All encompassing models (Random forest, XGB, LightGBM) and Interpretation  
+-   Add more predictors to gam or mixed model and more explorations/visualizations.     
+-   More All encompassing models (Random forest, XGB, LightGBM) and Interpretation.    
     -   Global Model-Agnostic Methods
         -   The partial dependence plot: a feature effect method.  
         -   Accumulated local effect plots: another feature effect method that works when features are dependent.    

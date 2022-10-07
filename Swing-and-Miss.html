@@ -205,7 +205,7 @@ pre code {
 </li>
 <li>plate_z: The vertical location of the ball when it crosses home plate (ft)</li>
 </ul>
-<p>There are also a few context features like innings, strikes, runners, outs in this dataset. However, in this project we will focus more on the above features first.</p>
+<p>There are also a few context features like innings, strikes, runners, outs in this dataset. However, in this project we will focus more on the above features.</p>
 </div>
 <div id="steps" class="section level3">
 <h3>Steps</h3>
@@ -358,7 +358,7 @@ ggplot(df_cb %&gt;% filter(Pitch_Outcome %in% c(&#39;BallCalled&#39;, &#39;Strik
 </div>
 <div id="initial-logistic-regression-models" class="section level3">
 <h3>Initial Logistic Regression Models</h3>
-<p>We will start with two logistic regression models with stepwise feature selection. The dependent variable of the first model will be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of BallCalled, FoulBall, InPlay or StrikeCalled. By this, we get to expect <strong>if the pitch will generate a whiff based on the features given</strong>. In Model 2, the dependent variable will also be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of Foul Ball or InPlay. In this second model, we get to expect <strong>if the pitch will generate a whiff given that the batters swing at the pitch based on the features given</strong>. Both models have their own intention. Although traditionally swing and miss rate is defined as the pitches hitters swing and miss at divided by total pitches thrown by a pitcher(Model 2), here we will actually focus a bit more on Model 1 because Model 1 here has the higher accuracy as from below (0.89 in Model1 and 0.77 in Model2), and also intuitively, we could want our pitchers to throw a pitch that both gets the batter to swing and then miss.</p>
+<p>We will start with two logistic regression models with stepwise feature selection. The dependent variable of the first model will be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of BallCalled, FoulBall, InPlay or StrikeCalled. By this, we get to expect <strong>if the pitch will generate a whiff based on the features given</strong>. In Model 2, the dependent variable will also be a binary variable, the pitch outcome being StrikeSwinging(whiff) or the pitch outcome being one of Foul Ball or InPlay. In this second model, we get to expect <strong>if the pitch will generate a whiff given that the batters swing at the pitch based on the features given</strong>. Both models have their own intentions. Although traditionally swing and miss rate is defined as the pitches hitters swing and miss at divided by total pitches thrown by a pitcher(Model 2), here we will actually focus a bit more on Model 1 because Model 1 here has the higher accuracy as from below (0.89 in Model1 and 0.77 in Model2), and also intuitively, we could want our pitchers to throw a pitch that both gets the batter to swing and then miss.</p>
 <p><strong>Logistic Regression Model 1</strong></p>
 <pre class="r"><code>#Set the targeted outcome
 df_train1 &lt;- df_cb %&gt;% 
@@ -793,7 +793,7 @@ df_grid_xgb &lt;- cbind(df_grid, pred_xgb)
 df_grid_gam &lt;- df_grid %&gt;% 
   add_predictions(gam_mod_xy, var = &#39;pred_logit&#39;) %&gt;% 
   add_predictions(gam_mod_xy, var = &#39;pred_prob&#39;, type = &#39;response&#39;)</code></pre>
-<p>From Figure 8, 9, 10 below you will be interested in the relationship between cb swing and miss prediction and plate locations by different handedness and models (GAM, XGBoost, Random Forest, respectively). In Figure 11, you’ll see the actual swing and miss rate based on plate location. Also in Figure 11, we could solidify our belief that plate_x and plate_z are indeed related. Generally from these plots, it’s still <strong>vertically throwing at the lower half of the strikezone or out of the strike zone</strong> and <strong>horizontally throwing at the left handed batter side</strong> being more effective. Also, <strong>LHP throwing further down and out againt RHB</strong> could have surprising good effect in generating swing and misses.</p>
+<p>From Figure 8, 9, 10 below you will be interested in the relationship between cb swing and miss prediction and plate locations by different handedness and models (GAM, Random Forest and xgboost, respectively). In Figure 11, you’ll see the actual swing and miss rate based on plate location. Also in Figure 11, we could solidify our belief that plate_x and plate_z are indeed related. Generally from these plots, it’s still <strong>vertically throwing at the lower half of the strikezone or out of the strike zone</strong> and <strong>horizontally throwing at the left handed batter side</strong> being more effective. Also, <strong>LHP throwing further down and out againt RHB</strong> could have surprising good effect in generating swings and misses.</p>
 <pre class="r"><code>ggplot(df_grid_gam, aes(x = plate_x, y = plate_z, fill = pred_prob, z = pred_prob)) +
   geom_raster() +
   geom_contour() + 
@@ -919,6 +919,26 @@ summary(regression_mod)</code></pre>
 ## Number of iterations to convergence: 7 
 ## Achieved convergence tolerance: 3.109e-06</code></pre>
 <pre class="r"><code>regression_mod &lt;- nls(
+  I(SMAA_rf.sh1 / n.sh1) ~ (SMAA_rf.sh2 + 0 * ballast)/(n.sh2 + ballast),
+  data = df_player_sh_train,
+  start = list(ballast=1000),
+  lower = list(ballast=10),
+  weights = eff_wt
+)
+
+summary(regression_mod)</code></pre>
+<pre><code>## 
+## Formula: I(SMAA_rf.sh1/n.sh1) ~ (SMAA_rf.sh2 + 0 * ballast)/(n.sh2 + ballast)
+## 
+## Parameters:
+##         Estimate Std. Error t value Pr(&gt;|t|)
+## ballast    49.21      51.16   0.962     0.38
+## 
+## Residual standard error: 0.2754 on 5 degrees of freedom
+## 
+## Number of iterations to convergence: 6 
+## Achieved convergence tolerance: 6.257e-07</code></pre>
+<pre class="r"><code>regression_mod &lt;- nls(
   I(SMAA_xgb.sh1 / n.sh1) ~ (SMAA_xgb.sh2 + 0 * ballast)/(n.sh2 + ballast),
   data = df_player_sh_train,
   start = list(ballast=1000),
@@ -939,26 +959,6 @@ summary(regression_mod)</code></pre>
 ## 
 ## Number of iterations to convergence: 6 
 ## Achieved convergence tolerance: 9.547e-07</code></pre>
-<pre class="r"><code>regression_mod &lt;- nls(
-  I(SMAA_rf.sh1 / n.sh1) ~ (SMAA_rf.sh2 + 0 * ballast)/(n.sh2 + ballast),
-  data = df_player_sh_train,
-  start = list(ballast=1000),
-  lower = list(ballast=10),
-  weights = eff_wt
-)
-
-summary(regression_mod)</code></pre>
-<pre><code>## 
-## Formula: I(SMAA_rf.sh1/n.sh1) ~ (SMAA_rf.sh2 + 0 * ballast)/(n.sh2 + ballast)
-## 
-## Parameters:
-##         Estimate Std. Error t value Pr(&gt;|t|)
-## ballast    49.21      51.16   0.962     0.38
-## 
-## Residual standard error: 0.2754 on 5 degrees of freedom
-## 
-## Number of iterations to convergence: 6 
-## Achieved convergence tolerance: 6.257e-07</code></pre>
 <pre class="r"><code>#rf true talent
 df_player %&gt;% 
   mutate(
@@ -1029,7 +1029,7 @@ summary(glmer)</code></pre>
 </li>
 <li>Who the pitcher is affects how strong this phenomenon is. We can see the true talent for this “skill” for the pitchers in the dataset in the leaderboard. However, the sample size is small here. More instances should give us more confidence in this.<br />
 </li>
-<li>A summary here about how we go from logistic regression to xgboost: We started with a simple and interpretable algorithm in logistic regression. The result was fine, and we got some valuable interpretation. However, there could be non-linear relationship. Thus, we went to GAM. We captured some valuable non-linear relationship and interaction. However, there are still some underfitting issues, which brought us to more complex models in random forest and xgboost. The prediction we got from these two complex models are a bit discrete, which is representative of their tree structure. However, the random forest model was still most powerful in helping us with the true talent calculations. Hopefully with these models, we not only had some good interpretations, but also accurate predictions.</li>
+<li>A summary here about how we go from logistic regression to xgboost: We started with a simple and interpretable algorithm in logistic regression. The result was fine, and we got some valuable interpretation. However, there could be non-linear relationship. Thus, we went to GAM. We captured some valuable non-linear relationship and interaction. However, there are still some underfitting issues, which brought us to more complex models in random forest and xgboost. The prediction we got from these two complex models are a bit discrete, which is representative of their tree structure. However, the random forest model was still most powerful in helping us with the true talent calculations. Lastly, we used the mixed model to confirm our findings and justify the action of calculating the true talent of this skill. Hopefully with these models, we not only had some good interpretations, but also accurate predictions.</li>
 </ol>
 </div>
 <div id="some-limitations-and-potential-future-steps" class="section level3">
@@ -1039,9 +1039,9 @@ summary(glmer)</code></pre>
 </li>
 <li>Add more instances to the dataset.<br />
 </li>
-<li>Add more predictors to gam or mixed model and more explorations/visualizations<br />
+<li>Add more predictors to gam or mixed model and more explorations/visualizations.<br />
 </li>
-<li>More All encompassing models (Random forest, XGB, LightGBM) and Interpretation
+<li>More All encompassing models (Random forest, XGB, LightGBM) and Interpretation.
 <ul>
 <li>Global Model-Agnostic Methods
 <ul>
